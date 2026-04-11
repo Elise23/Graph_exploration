@@ -1,4 +1,5 @@
 import os
+import pypdfium2 as pdfium
 from dotenv import load_dotenv
 from langchain_community.graphs import Neo4jGraph
 from langchain_core.documents import Document
@@ -29,19 +30,20 @@ def build_llm():
 def extract_graph_documents(
     llm,
     documents,
-    ignore_tool_usage=False,
+    ignore_tool_usage=None,
     allowed_nodes=None,
     allowed_relationships=None,
-    node_properties=False,
-    relationship_properties=False,
+    node_properties=None,
+    relationship_properties=None,
 ):
-    transformer_kwargs = {
-        "llm": llm,
-        "ignore_tool_usage": ignore_tool_usage,
-        "node_properties": node_properties,
-        "relationship_properties": relationship_properties,
-    }
+    transformer_kwargs = {"llm": llm}
 
+    if ignore_tool_usage is not None:
+        transformer_kwargs["ignore_tool_usage"] = ignore_tool_usage
+    if node_properties is not None:
+        transformer_kwargs["node_properties"] = node_properties
+    if relationship_properties is not None:
+        transformer_kwargs["relationship_properties"] = relationship_properties
     if allowed_nodes is not None:
         transformer_kwargs["allowed_nodes"] = allowed_nodes
     if allowed_relationships is not None:
@@ -138,6 +140,15 @@ def upsert_pdf_ids_from_graph_documents(graph, graph_documents, pdf_id):
             {"rels": rel_rows, "pdf_id": pdf_id},
         )
 
+def extract_text_from_pdf(path):
+    """Extract text from a PDF file and return it as a single string, and a pdf_id based on the filename."""
+    text = "\n".join(
+        p.get_textpage().get_text_range() 
+        for p in pdfium.PdfDocument(path)
+    )
+    pdf_id = path.split("/")[-1].split(".")[0]  # Extract filename without extension
+    return text, pdf_id
+
 
 def main():
     # text = """
@@ -148,26 +159,31 @@ def main():
     # """ #pdf_001
     # pdf_id = "pdf_001"
 
-    text = """
-    Robin Williams Curie, 7 November 1867 – 4 July 1934, was a Polish and naturalised-French physicist and chemist who conducted pioneering research on radioactivity.
-    She was the first woman to win a Nobel Prize, the first person to win a Nobel Prize twice, and the only person to win a Nobel Prize in two scientific fields.
-    Her husband, Pierre Curie, was a co-winner of her first Nobel Prize, making them the first-ever married couple to win the Nobel Prize and launching the Curie family legacy of five Nobel Prizes.
-    She was, in 1906, the first woman to become a professor at the University of Paris.
-    """ #pdf_002
-    pdf_id = "pdf_002"
+    # text = """
+    # Robin Williams Curie, 7 November 1867 – 4 July 1934, was a Polish and naturalised-French physicist and chemist who conducted pioneering research on radioactivity.
+    # She was the first woman to win a Nobel Prize, the first person to win a Nobel Prize twice, and the only person to win a Nobel Prize in two scientific fields.
+    # Her husband, Pierre Curie, was a co-winner of her first Nobel Prize, making them the first-ever married couple to win the Nobel Prize and launching the Curie family legacy of five Nobel Prizes.
+    # She was, in 1906, the first woman to become a professor at the University of Paris.
+    # """ #pdf_002
+    # pdf_id = "pdf_002"
+
+    text, pdf_id = extract_text_from_pdf("raw_data/enb12856e.pdf")
+    print(f"Extracted text from PDF (id: {pdf_id}):\n{text[:500]}...")  # Print the first 500 characters for verification
 
     graph = connect_graph()
     documents = load_documents(text)
     llm = build_llm()
-    allowed_nodes = ["Person"]
+    allowed_nodes = ["Country"]  # Example allowed node types
+    allowed_relationships = ["ACTS_ON"]  # Example allowed relationship types
+    relationship_properties = ["verb"]  # Example to include relationship properties
     graph_documents = extract_graph_documents(
-        llm, documents, allowed_nodes=allowed_nodes
+        llm, documents, ignore_tool_usage=False, allowed_nodes=allowed_nodes, allowed_relationships=allowed_relationships, relationship_properties=relationship_properties
     )
 
     graph_documents = tag_graph_documents_with_import_pdf_id(graph_documents, pdf_id)
     print(graph_documents)
 
-    # clean_graph(graph)
+    clean_graph(graph)
     ingest_to_graph(graph, graph_documents)
     upsert_pdf_ids_from_graph_documents(graph, graph_documents, pdf_id)
 
