@@ -31,7 +31,7 @@ def load_documents(text):
 
 
 def build_llm():
-    return ChatOpenAI(model="gpt-4o")  # reads OPENAI_API_KEY from .env automatically
+    return ChatOpenAI(model="gpt-4o", temperature=0)  # reads OPENAI_API_KEY from .env automatically
 
 
 def extract_global_relationship_types(llm, text):
@@ -292,7 +292,7 @@ def main():
     text, pdf_id = extract_text_from_pdf("raw_data/enb12856e.pdf")
     print(f"Extracted text from PDF (id: {pdf_id}):\n{text[:500]}...")  # Print the first 500 characters for verification
 
-    # graph = connect_graph()
+    graph = connect_graph()
     documents = load_documents(text)
     llm = build_llm()
 
@@ -300,19 +300,20 @@ def main():
     relationship_types = get_or_extract_relationship_types(llm, text, pdf_id)
     print(f"Extracted relationship types for {pdf_id}: {relationship_types}")
 
-    # allowed_nodes = ["Country"]  # Example allowed node types
-    # allowed_relationships = ["ACTS_ON"]  # Example allowed relationship types
+    # Step 2: Extract graph documents with constraints
+    allowed_nodes = ["Country"]  # Example allowed node types
+    allowed_relationships = relationship_types
     # relationship_properties = ["verb"]  # Example to include relationship properties
-    # graph_documents = extract_graph_documents(
-    #     llm, documents, ignore_tool_usage=False, allowed_nodes=allowed_nodes, allowed_relationships=allowed_relationships, relationship_properties=relationship_properties
-    # )
+    graph_documents = extract_graph_documents(
+        llm, documents, ignore_tool_usage=False, allowed_nodes=allowed_nodes, allowed_relationships=allowed_relationships,
+    )
 
-    # graph_documents = tag_graph_documents_with_import_pdf_id(graph_documents, pdf_id)
-    # print(graph_documents)
+    graph_documents = tag_graph_documents_with_import_pdf_id(graph_documents, pdf_id)
+    print(graph_documents)
 
-    # clean_graph(graph)
-    # ingest_to_graph(graph, graph_documents)
-    # upsert_pdf_ids_from_graph_documents(graph, graph_documents, pdf_id)
+    clean_graph(graph)
+    ingest_to_graph(graph, graph_documents)
+    upsert_pdf_ids_from_graph_documents(graph, graph_documents, pdf_id)
 
 
 if __name__ == "__main__":
