@@ -1,4 +1,8 @@
+import ast
+import json
 import os
+from pathlib import Path
+import re
 import pypdfium2 as pdfium
 from dotenv import load_dotenv
 from langchain_community.graphs import Neo4jGraph
@@ -7,6 +11,9 @@ from langchain_experimental.graph_transformers import LLMGraphTransformer
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
+
+CACHE_PATH = Path("raw_data/relationship_types_cache.json")
+RELATION_TOKEN_PATTERN = re.compile(r"[A-Z]+(?:_[A-Z]+)*")
 
 
 def connect_graph():
@@ -26,6 +33,121 @@ def load_documents(text):
 def build_llm():
     return ChatOpenAI(model="gpt-4o")  # reads OPENAI_API_KEY from .env automatically
 
+
+def extract_global_relationship_types(llm, text):
+    prompt = f"""
+You are an expert in information extraction and knowledge graph construction.
+
+Your task is to analyze the following text and identify the main types of relationships that can exist specifically BETWEEN COUNTRIES.
+
+The goal is NOT to extract individual relations, but to define a SMALL and GENERAL set of RELATION TYPES that can be used to build a consistent knowledge graph of interactions between countries.
+
+Important constraints:
+- ONLY consider relationships where BOTH entities are countries
+- Ignore any relationships involving organizations, institutions, NGOs, or individuals
+- Focus only on meaningful geopolitical or diplomatic interactions between countries
+
+Instructions:
+- Group similar actions under the same relation type
+- Use high-level, normalized relation names (e.g., SUPPORTS, OPPOSES, NEGOTIATES_WITH)
+- Avoid very specific or rare verbs
+- Each relation type must be:
+  - UPPERCASE
+  - concise
+  - semantically clear
+- Limit the number of relation types to 5–10 maximum
+- The relation types should be reusable across multiple documents
+
+Output format:
+Return ONLY a Python list of strings, like:
+["SUPPORTS", "OPPOSES", "NEGOTIATES_WITH", "CALLS_FOR"]
+
+Text:
+\"\"\"
+{text}
+\"\"\"
+"""
+
+    response = llm.invoke(prompt)
+    content = response.content.strip()
+
+    # --- Robust parsing ---
+    try:
+        relations = ast.literal_eval(content)
+        if isinstance(relations, list):
+            return sanitize_relationship_types(relations)
+    except Exception:
+        pass
+
+    # fallback simple si le format n'est pas respecté
+    lines = content.replace("[", "").replace("]", "").split(",")
+    relations = [l.strip().strip('"').strip("'") for l in lines if l.strip()]
+
+    return sanitize_relationship_types(relations)
+
+
+def sanitize_relationship_types(raw_values):
+    """Normalize and filter noisy LLM outputs into clean relation labels."""
+    if not isinstance(raw_values, list):
+        return []
+
+    clean_relations = []
+    seen = set()
+
+    for value in raw_values:
+        if not isinstance(value, str):
+            value = str(value)
+
+        cleaned = value.upper()
+        cleaned = cleaned.replace("```PYTHON", " ")
+        cleaned = cleaned.replace("```", " ")
+
+        for token in RELATION_TOKEN_PATTERN.findall(cleaned):
+            if token == "PYTHON":
+                continue
+            if token not in seen:
+                seen.add(token)
+                clean_relations.append(token)
+
+    return clean_relations
+
+
+def load_relationship_types_cache():
+    if not CACHE_PATH.exists():
+        return {}
+
+    try:
+        with CACHE_PATH.open("r", encoding="utf-8") as cache_file:
+            cache = json.load(cache_file)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    return cache if isinstance(cache, dict) else {}
+
+
+def save_relationship_types_cache(cache):
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with CACHE_PATH.open("w", encoding="utf-8") as cache_file:
+        json.dump(cache, cache_file, ensure_ascii=False, indent=2)
+
+
+def get_or_extract_relationship_types(llm, text, pdf_id):
+    cache = load_relationship_types_cache()
+
+    if pdf_id in cache and isinstance(cache[pdf_id], list):
+        cached_relationships = sanitize_relationship_types(cache[pdf_id])
+        if cached_relationships:
+            if cached_relationships != cache[pdf_id]:
+                cache[pdf_id] = cached_relationships
+                save_relationship_types_cache(cache)
+            return cached_relationships
+
+    relationship_types = sanitize_relationship_types(
+        extract_global_relationship_types(llm, text)
+    )
+    cache[pdf_id] = relationship_types
+    save_relationship_types_cache(cache)
+    return relationship_types
 
 def extract_graph_documents(
     llm,
@@ -170,22 +292,27 @@ def main():
     text, pdf_id = extract_text_from_pdf("raw_data/enb12856e.pdf")
     print(f"Extracted text from PDF (id: {pdf_id}):\n{text[:500]}...")  # Print the first 500 characters for verification
 
-    graph = connect_graph()
+    # graph = connect_graph()
     documents = load_documents(text)
     llm = build_llm()
-    allowed_nodes = ["Country"]  # Example allowed node types
-    allowed_relationships = ["ACTS_ON"]  # Example allowed relationship types
-    relationship_properties = ["verb"]  # Example to include relationship properties
-    graph_documents = extract_graph_documents(
-        llm, documents, ignore_tool_usage=False, allowed_nodes=allowed_nodes, allowed_relationships=allowed_relationships, relationship_properties=relationship_properties
-    )
 
-    graph_documents = tag_graph_documents_with_import_pdf_id(graph_documents, pdf_id)
-    print(graph_documents)
+    # Step 1: Extract global relationship
+    relationship_types = get_or_extract_relationship_types(llm, text, pdf_id)
+    print(f"Extracted relationship types for {pdf_id}: {relationship_types}")
 
-    clean_graph(graph)
-    ingest_to_graph(graph, graph_documents)
-    upsert_pdf_ids_from_graph_documents(graph, graph_documents, pdf_id)
+    # allowed_nodes = ["Country"]  # Example allowed node types
+    # allowed_relationships = ["ACTS_ON"]  # Example allowed relationship types
+    # relationship_properties = ["verb"]  # Example to include relationship properties
+    # graph_documents = extract_graph_documents(
+    #     llm, documents, ignore_tool_usage=False, allowed_nodes=allowed_nodes, allowed_relationships=allowed_relationships, relationship_properties=relationship_properties
+    # )
+
+    # graph_documents = tag_graph_documents_with_import_pdf_id(graph_documents, pdf_id)
+    # print(graph_documents)
+
+    # clean_graph(graph)
+    # ingest_to_graph(graph, graph_documents)
+    # upsert_pdf_ids_from_graph_documents(graph, graph_documents, pdf_id)
 
 
 if __name__ == "__main__":
