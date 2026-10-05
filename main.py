@@ -273,22 +273,6 @@ def extract_text_from_pdf(path):
 
 
 def main():
-    # text = """
-    # Marie Curie, 7 November 1867 – 4 July 1934, was a Polish and naturalised-French physicist and chemist who conducted pioneering research on radioactivity.
-    # She was the first woman to win a Nobel Prize, the first person to win a Nobel Prize twice, and the only person to win a Nobel Prize in two scientific fields.
-    # Her husband, Pierre Curie, was a co-winner of her first Nobel Prize, making them the first-ever married couple to win the Nobel Prize and launching the Curie family legacy of five Nobel Prizes.
-    # She was, in 1906, the first woman to become a professor at the University of Paris.
-    # """ #pdf_001
-    # pdf_id = "pdf_001"
-
-    # text = """
-    # Robin Williams Curie, 7 November 1867 – 4 July 1934, was a Polish and naturalised-French physicist and chemist who conducted pioneering research on radioactivity.
-    # She was the first woman to win a Nobel Prize, the first person to win a Nobel Prize twice, and the only person to win a Nobel Prize in two scientific fields.
-    # Her husband, Pierre Curie, was a co-winner of her first Nobel Prize, making them the first-ever married couple to win the Nobel Prize and launching the Curie family legacy of five Nobel Prizes.
-    # She was, in 1906, the first woman to become a professor at the University of Paris.
-    # """ #pdf_002
-    # pdf_id = "pdf_002"
-
     text, pdf_id = extract_text_from_pdf("raw_data/enb12856e.pdf")
     print(f"Extracted text from PDF (id: {pdf_id}):\n{text[:500]}...")  # Print the first 500 characters for verification
 
